@@ -1,618 +1,736 @@
-import sys, os, platform, shutil, subprocess, json, requests
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QListWidget, QStackedWidget,
-    QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QListWidgetItem,
-    QLineEdit, QComboBox, QColorDialog, QFormLayout, QMessageBox, QSlider
-)
-from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt
+import sys
+import os
+import json
+import subprocess
+import platform
+import pygame
+import pygame.gfxdraw
+import math
+import time
+from pygame.locals import *
 
-CONFIG_DIR = "config"
+# Inicializar Pygame
+pygame.init()
+pygame.font.init()
 
-GOOGLE_LANGS = {
-    "af": "Afrikaans", "sq": "Albanian", "am": "Amharic", "ar": "Arabic", "hy": "Armenian", "az": "Azerbaijani",
-    "eu": "Basque", "be": "Belarusian", "bn": "Bengali", "bs": "Bosnian", "bg": "Bulgarian", "ca": "Catalan",
-    "ceb": "Cebuano", "zh-CN": "Chinese (Simplified)", "zh-TW": "Chinese (Traditional)", "co": "Corsican",
-    "hr": "Croatian", "cs": "Czech", "da": "Danish", "nl": "Dutch", "en": "English", "eo": "Esperanto",
-    "et": "Estonian", "fi": "Finnish", "fr": "French", "fy": "Frisian", "gl": "Galician", "ka": "Georgian",
-    "de": "German", "el": "Greek", "gu": "Gujarati", "ht": "Haitian Creole", "ha": "Hausa", "haw": "Hawaiian",
-    "he": "Hebrew", "hi": "Hindi", "hmn": "Hmong", "hu": "Hungarian", "is": "Icelandic", "ig": "Igbo",
-    "id": "Indonesian", "ga": "Irish", "it": "Italian", "ja": "Japanese", "jw": "Javanese", "kn": "Kannada",
-    "kk": "Kazakh", "km": "Khmer", "ko": "Korean", "ku": "Kurdish", "ky": "Kyrgyz", "lo": "Lao", "la": "Latin",
-    "lv": "Latvian", "lt": "Lithuanian", "lb": "Luxembourgish", "mk": "Macedonian", "mg": "Malagasy",
-    "ms": "Malay", "ml": "Malayalam", "mt": "Maltese", "mi": "Maori", "mr": "Marathi", "mn": "Mongolian",
-    "my": "Myanmar (Burmese)", "ne": "Nepali", "no": "Norwegian", "ny": "Nyanja (Chichewa)", "or": "Odia",
-    "ps": "Pashto", "fa": "Persian", "pl": "Polish", "pt": "Portuguese", "pa": "Punjabi", "ro": "Romanian",
-    "ru": "Russian", "sm": "Samoan", "gd": "Scots Gaelic", "sr": "Serbian", "st": "Sesotho", "sn": "Shona",
-    "sd": "Sindhi", "si": "Sinhala", "sk": "Slovak", "sl": "Slovenian", "so": "Somali", "es": "Spanish",
-    "su": "Sundanese", "sw": "Swahili", "sv": "Swedish", "tl": "Tagalog (Filipino)", "tg": "Tajik", "ta": "Tamil",
-    "tt": "Tatar", "te": "Telugu", "th": "Thai", "tr": "Turkish", "tk": "Turkmen", "uk": "Ukrainian",
-    "ur": "Urdu", "ug": "Uyghur", "uz": "Uzbek", "vi": "Vietnamese", "cy": "Welsh", "xh": "Xhosa", "yi": "Yiddish",
-    "yo": "Yoruba", "zu": "Zulu"
+# Configuración de la ventana
+WIDTH, HEIGHT = 1000, 700
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Universal System Tweaker")
+
+# Colores
+GITHUB_LIGHT = {
+    'bg': (246, 248, 250),
+    'card': (255, 255, 255),
+    'text': (36, 41, 46),
+    'text_secondary': (88, 96, 105),
+    'primary': (3, 102, 214),
+    'success': (40, 167, 69),
+    'border': (225, 228, 232),
+    'hover': (243, 244, 246),
+    'tab_bg': (241, 243, 245),
+    'tab_active': (255, 255, 255)
 }
 
-class FlatrConfigurator(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Configuración del Sistema")
-        self.setFixedSize(1000, 650)
-        self.apps_dir = self.get_apps_directory()
-        self.text_color = "#000000"
-        self.button_color = "#0078D7"
-        self.language = "es"
-        self.translations = self.load_language(self.language)
+GITHUB_DARK = {
+    'bg': (22, 27, 34),
+    'card': (33, 38, 45),
+    'text': (240, 246, 252),
+    'text_secondary': (139, 148, 158),
+    'primary': (47, 129, 247),
+    'success': (87, 171, 90),
+    'border': (48, 54, 61),
+    'hover': (48, 54, 61),
+    'tab_bg': (33, 38, 45),
+    'tab_active': (48, 54, 61)
+}
 
-        os.makedirs(CONFIG_DIR, exist_ok=True)
+# Cargar configuración de tema
+def load_theme_config():
+    try:
+        if os.path.exists("theme_config.json"):
+            with open("theme_config.json", "r") as f:
+                config = json.load(f)
+                return config.get("dark_mode", False)
+    except:
+        pass
+    return False
 
-        self.sidebar = QListWidget()
-        self.sidebar.setFixedWidth(220)
-        self.stack = QStackedWidget()
-        self.header = QLabel(self.t("Wi-Fi"))
-        self.header.setStyleSheet("font-size: 20px; font-weight: bold; padding: 12px;")
-        self.sidebar.currentRowChanged.connect(self.update_section)
+# Guardar configuración de tema
+def save_theme_config(dark_mode):
+    config = {"dark_mode": dark_mode}
+    with open("theme_config.json", "w") as f:
+        json.dump(config, f)
 
-        self.sections = {
-            self.t("Wi-Fi"): self.wifi_panel(),
-            self.t("Bluetooth"): self.bluetooth_panel(),
-            self.t("Aplicaciones"): self.apps_panel(),
-            self.t("Almacenamiento"): self.storage_panel(),
-            self.t("Tema"): self.theme_panel(),
-            self.t("Pantalla y Batería"): self.display_battery_panel(),
-            self.t("Idioma del sistema"): self.language_panel(),
-            self.t("Actualizaciones"): self.update_panel(),
-            self.t("Acerca del dispositivo"): self.about_panel()
-        }
+# Cargar configuración de idioma
+def load_language_config():
+    try:
+        if os.path.exists("config.json"):
+            with open("config.json", "r") as f:
+                config = json.load(f)
+                return config.get("language", "en"), config.get("remember", False)
+    except:
+        pass
+    return "en", False
 
-        for name, widget in self.sections.items():
-            item = QListWidgetItem(name)
-            self.sidebar.addItem(item)
-            self.stack.addWidget(widget)
+# Guardar configuración de idioma
+def save_language_config(language, remember):
+    config = {"language": language, "remember": remember}
+    with open("config.json", "w") as f:
+        json.dump(config, f)
 
-        self.sidebar.setCurrentRow(0)
+# Traducciones
+translations = {
+    "en": {
+        "title": "Universal System Tweaker",
+        "select_language": "Select your language",
+        "remember_choice": "Remember my choice",
+        "continue": "Continue",
+        "windows_tweaks": "Windows Tweaks",
+        "linux_tweaks": "Linux Tweaks",
+        "terminal_output": "Terminal Output",
+        "performance_optimization": "Performance Optimization",
+        "disable_animations": "Disable unnecessary animations",
+        "prefetch_tweaks": "Optimize Prefetch configuration",
+        "disable_tips": "Disable Windows tips",
+        "privacy_settings": "Privacy Settings",
+        "disable_telemetry": "Limit telemetry",
+        "disable_ads": "Disable built-in advertising",
+        "apply_selected": "Apply selected changes",
+        "basic_linux_settings": "Basic Linux Settings",
+        "enable_ufw": "Enable firewall (UFW)",
+        "install_updates": "Install available updates",
+        "clean_packages": "Clean unnecessary packages",
+        "terminal_placeholder": "Terminal output will appear here",
+        "applying_settings": "Applying settings...",
+        "settings_applied": "Settings applied successfully!",
+        "select_option": "Please select at least one option",
+        "theme_toggle": "Toggle Dark/Light Mode",
+        "back": "Back"
+    },
+    "es": {
+        "title": "Configurador Universal de Sistema",
+        "select_language": "Selecciona tu idioma",
+        "remember_choice": "Recordar mi elección",
+        "continue": "Continuar",
+        "windows_tweaks": "Ajustes de Windows",
+        "linux_tweaks": "Ajustes de Linux",
+        "terminal_output": "Salida del Terminal",
+        "performance_optimization": "Optimización de Rendimiento",
+        "disable_animations": "Deshabilitar animaciones innecesarias",
+        "prefetch_tweaks": "Optimizar configuración Prefetch",
+        "disable_tips": "Deshabilitar sugerencias de Windows",
+        "privacy_settings": "Ajustes de Privacidad",
+        "disable_telemetry": "Limitar telemetría",
+        "disable_ads": "Deshabilitar publicidad integrada",
+        "apply_selected": "Aplicar cambios seleccionados",
+        "basic_linux_settings": "Ajustes Básicos de Linux",
+        "enable_ufw": "Habilitar firewall (UFW)",
+        "install_updates": "Instalar actualizaciones disponibles",
+        "clean_packages": "Limpiar paquetes innecesarios",
+        "terminal_placeholder": "La salida del terminal aparecerá aquí",
+        "applying_settings": "Aplicando configuración...",
+        "settings_applied": "¡Configuración aplicada con éxito!",
+        "select_option": "Por favor seleccione al menos una opción",
+        "theme_toggle": "Cambiar Modo Oscuro/Claro",
+        "back": "Volver"
+    },
+    "fr": {
+        "title": "Optimiseur Universel de Système",
+        "select_language": "Sélectionnez votre langue",
+        "remember_choice": "Se souvenir de mon choix",
+        "continue": "Continuer",
+        "windows_tweaks": "Réglages Windows",
+        "linux_tweaks": "Réglages Linux",
+        "terminal_output": "Sortie Terminal",
+        "performance_optimization": "Optimisation des Performances",
+        "disable_animations": "Désactiver les animations inutiles",
+        "prefetch_tweaks": "Optimiser la configuration Prefetch",
+        "disable_tips": "Désactiver les conseils Windows",
+        "privacy_settings": "Paramètres de Confidentialité",
+        "disable_telemetry": "Limiter la télémétrie",
+        "disable_ads": "Désactiver la publicité intégrée",
+        "apply_selected": "Appliquer les modifications sélectionnées",
+        "basic_linux_settings": "Paramètres Linux de Base",
+        "enable_ufw": "Activer le pare-feu (UFW)",
+        "install_updates": "Installer les mises à jour disponibles",
+        "clean_packages": "Nettoyer les paquets inutiles",
+        "terminal_placeholder": "La sortie du terminal apparaîtra ici",
+        "applying_settings": "Application des paramètres...",
+        "settings_applied": "Paramètres appliqués avec succès!",
+        "select_option": "Veuillez sélectionner au moins une option",
+        "theme_toggle": "Changer Mode Sombre/Clair",
+        "back": "Retour"
+    },
+    "de": {
+        "title": "Universal System Optimizer",
+        "select_language": "Wählen Sie Ihre Sprache",
+        "remember_choice": "Meine Wahl merken",
+        "continue": "Fortfahren",
+        "windows_tweaks": "Windows-Einstellungen",
+        "linux_tweaks": "Linux-Einstellungen",
+        "terminal_output": "Terminalausgabe",
+        "performance_optimization": "Leistungsoptimierung",
+        "disable_animations": "Unnötige Animationen deaktivieren",
+        "prefetch_tweaks": "Prefetch-Konfiguration optimieren",
+        "disable_tips": "Windows-Tipps deaktivieren",
+        "privacy_settings": "Datenschutzeinstellungen",
+        "disable_telemetry": "Telemetrie einschränken",
+        "disable_ads": "Eingebaute Werbung deaktivieren",
+        "apply_selected": "Ausgewählte Änderungen übernehmen",
+        "basic_linux_settings": "Grundlegende Linux-Einstellungen",
+        "enable_ufw": "Firewall aktivieren (UFW)",
+        "install_updates": "Verfügbare Updates installieren",
+        "clean_packages": "Unnötige Pakete bereinigen",
+        "terminal_placeholder": "Terminalausgabe wird hier angezeigt",
+        "applying_settings": "Einstellungen werden übernommen...",
+        "settings_applied": "Einstellungen erfolgreich übernommen!",
+        "select_option": "Bitte wählen Sie mindestens eine Option",
+        "theme_toggle": "Dunkel/Hell-Modus umschalten",
+        "back": "Zurück"
+    },
+    "it": {
+        "title": "Ottimizzatore Universale di Sistema",
+        "select_language": "Seleziona la tua lingua",
+        "remember_choice": "Ricorda la mia scelta",
+        "continue": "Continua",
+        "windows_tweaks": "Ottimizzazioni Windows",
+        "linux_tweaks": "Ottimizzazioni Linux",
+        "terminal_output": "Output Terminale",
+        "performance_optimization": "Ottimizzazione Prestazioni",
+        "disable_animations": "Disabilita animazioni non necessarie",
+        "prefetch_tweaks": "Ottimizza configurazione Prefetch",
+        "disable_tips": "Disabilita suggerimenti Windows",
+        "privacy_settings": "Impostazioni Privacy",
+        "disable_telemetry": "Limita telemetria",
+        "disable_ads": "Disabilita pubblicità incorporata",
+        "apply_selected": "Applica modifiche selezionate",
+        "basic_linux_settings": "Impostazioni Base Linux",
+        "enable_ufw": "Abilita firewall (UFW)",
+        "install_updates": "Installa aggiornamenti disponibili",
+        "clean_packages": "Pulisci pacchetti non necessari",
+        "terminal_placeholder": "L'output del terminale apparirà qui",
+        "applying_settings": "Applicazione impostazioni...",
+        "settings_applied": "Impostazioni applicate con successo!",
+        "select_option": "Seleziona almeno un'opzione",
+        "theme_toggle": "Attiva/Disattiva Modalità Scura/Chiara",
+        "back": "Indietro"
+    }
+}
 
-        content = QVBoxLayout()
-        content.addWidget(self.header)
-        content.addWidget(self.stack)
+# Clase para partículas animadas
+class Particle:
+    def __init__(self, x, y, color, size, speed_x, speed_y):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.size = size
+        self.speed_x = speed_x
+        self.speed_y = speed_y
+        self.lifetime = 100 + 100 * (time.time() % 1)
 
-        layout = QHBoxLayout()
-        layout.addWidget(self.sidebar)
-        layout.addLayout(content)
+    def update(self):
+        self.x += self.speed_x
+        self.y += self.speed_y
+        self.lifetime -= 1
+        return self.lifetime > 0
 
-        container = QWidget()
-        container.setLayout(layout)
-        self.setCentralWidget(container)
-        self.apply_theme()
+    def draw(self, surface):
+        alpha = min(255, int(self.lifetime * 2.55))
+        color_with_alpha = (*self.color, alpha)
+        pygame.gfxdraw.filled_circle(surface, int(self.x), int(self.y), int(self.size), color_with_alpha)
 
-    def t(self, key):
-        """Translation helper"""
-        return self.translations.get(key, key)
+# Clase para botones personalizados
+class Button:
+    def __init__(self, x, y, width, height, text, color, hover_color, text_color, font, action=None, border_radius=6):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.text = text
+        self.color = color
+        self.hover_color = hover_color
+        self.text_color = text_color
+        self.font = font
+        self.action = action
+        self.border_radius = border_radius
+        self.hovered = False
 
-    def update_section(self, index):
-        self.stack.setCurrentIndex(index)
-        self.header.setText(self.sidebar.item(index).text())
+    def draw(self, surface):
+        color = self.hover_color if self.hovered else self.color
+        pygame.draw.rect(surface, color, self.rect, border_radius=self.border_radius)
+        pygame.draw.rect(surface, self.text_color, self.rect, width=1, border_radius=self.border_radius)
 
-    def apply_theme(self):
-        self.setStyleSheet(f"""
-            QMainWindow {{ background-color: #f0f0f0; }}
-            QLabel {{ color: {self.text_color}; font-size: 14px; }}
-            QPushButton {{
-                background-color: {self.button_color};
-                color: white;
-                border-radius: 6px;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{ background-color: #005A9E; }}
-            QListWidget {{ background-color: #e0e0e0; border: none; }}
-            QListWidget::item {{ padding: 12px; }}
-            QListWidget::item:selected {{ background-color: #ffffff; }}
-        """)
+        text_surface = self.font.render(self.text, True, self.text_color)
+        text_rect = text_surface.get_rect(center=self.rect.center)
+        surface.blit(text_surface, text_rect)
 
-    # Wi-Fi Panel
-    def wifi_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(self.t("Redes Wi-Fi disponibles:")))
-        self.wifi_list = QComboBox()
-        self.wifi_pass = QLineEdit()
-        self.wifi_pass.setPlaceholderText(self.t("Contraseña"))
-        self.wifi_pass.setEchoMode(QLineEdit.EchoMode.Password)
-        connect_btn = QPushButton(self.t("Conectar"))
-        connect_btn.clicked.connect(self.connect_wifi)
+    def check_hover(self, pos):
+        self.hovered = self.rect.collidepoint(pos)
+        return self.hovered
 
-        try:
-            if os.name == "nt":
-                result = subprocess.check_output("netsh wlan show networks", shell=True).decode()
-                for line in result.splitlines():
-                    if "SSID" in line:
-                        ssid = line.split(":")[1].strip()
-                        self.wifi_list.addItem(ssid)
-            else:
-                result = subprocess.check_output("nmcli -t -f SSID dev wifi", shell=True).decode()
-                for ssid in result.splitlines():
-                    if ssid:
-                        self.wifi_list.addItem(ssid.strip())
-        except Exception as e:
-            layout.addWidget(QLabel(f"{self.t('Error al escanear redes')}: {e}"))
-
-        layout.addWidget(self.wifi_list)
-        layout.addWidget(self.wifi_pass)
-        layout.addWidget(connect_btn)
-        panel.setLayout(layout)
-        return panel
-
-    def connect_wifi(self):
-        ssid = self.wifi_list.currentText()
-        password = self.wifi_pass.text()
-        try:
-            if os.name == "nt":
-                subprocess.run(f'netsh wlan connect name="{ssid}"', shell=True)
-            else:
-                subprocess.run(f'nmcli dev wifi connect "{ssid}" password "{password}"', shell=True)
-            self.wifi_pass.clear()
-        except Exception as e:
-            QMessageBox.critical(self, self.t("Error"), f"{self.t('No se pudo conectar')}:\n{e}")
-
-    # Bluetooth Panel
-    def bluetooth_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(self.t("Bluetooth") + ":"))
-        layout.addWidget(QLabel(self.t("Usa dongle o adaptador interno.")))
-        panel.setLayout(layout)
-        return panel
-
-    # Apps Panel
-    def apps_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(self.t("Aplicaciones instaladas:")))
-        for folder in os.listdir(self.apps_dir):
-            path = os.path.join(self.apps_dir, folder)
-            if os.path.isdir(path):
-                size = self.get_folder_size(path)
-                btn = QPushButton(f"{folder} ({size} MB)")
-                btn.clicked.connect(lambda _, p=path: self.remove_app(p))
-                if size > 100:  # apps pesadas
-                    btn.setStyleSheet("background-color: #ff5555; color: white;")
-                layout.addWidget(btn)
-        panel.setLayout(layout)
-        return panel
-
-    def remove_app(self, path):
-        try:
-            shutil.rmtree(path)
-            QMessageBox.information(self, self.t("Eliminado"), f"{self.t('Se eliminó la app')}:\n{os.path.basename(path)}")
-        except Exception as e:
-            QMessageBox.critical(self, self.t("Error"), f"{self.t('No se pudo eliminar')}:\n{e}")
-
-    # Storage Panel
-    def storage_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        total, used, free = shutil.disk_usage("/")
-        layout.addWidget(QLabel(f"{self.t('Total')}: {total // (2**30)} GB"))
-        layout.addWidget(QLabel(f"{self.t('Usado')}: {used // (2**30)} GB"))
-        layout.addWidget(QLabel(f"{self.t('Libre')}: {free // (2**30)} GB"))
-        panel.setLayout(layout)
-        return panel
-
-    # Theme Panel
-    def theme_panel(self):
-        panel = QWidget()
-        layout = QFormLayout()
-        layout.addRow(QLabel(self.t("Color del texto") + ":"), self.color_picker("text"))
-        layout.addRow(QLabel(self.t("Color de botones") + ":"), self.color_picker("button"))
-        apply_btn = QPushButton(self.t("Aplicar tema"))
-        apply_btn.clicked.connect(self.apply_theme)
-        layout.addRow(apply_btn)
-        panel.setLayout(layout)
-        return panel
-
-    def color_picker(self, target):
-        btn = QPushButton(self.t("Seleccionar color"))
-        def pick():
-            color = QColorDialog.getColor()
-            if color.isValid():
-                hex_color = color.name()
-                if target == "text":
-                    self.text_color = hex_color
-                else:
-                    self.button_color = hex_color
-        btn.clicked.connect(pick)
-        return btn
-
-    # Display/Battery panel
-    def display_battery_panel(self):
-        panel = QWidget()
-        layout = QFormLayout()
-        # Brillo (simulado)
-        self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
-        self.brightness_slider.setMinimum(0)
-        self.brightness_slider.setMaximum(100)
-        self.brightness_slider.setValue(60)
-        layout.addRow(QLabel(self.t("Brillo de pantalla")), self.brightness_slider)
-
-        # Modo oscuro
-        self.dark_mode_btn = QPushButton(self.t("Alternar modo oscuro"))
-        self.dark_mode_btn.setCheckable(True)
-        self.dark_mode_btn.clicked.connect(self.toggle_dark_mode)
-        layout.addRow(self.dark_mode_btn)
-
-        # Batería (simulada)
-        battery_level = self.get_battery_level()
-        layout.addRow(QLabel(self.t("Nivel de batería")), QLabel(f"{battery_level}%"))
-
-        panel.setLayout(layout)
-        return panel
-
-    def toggle_dark_mode(self):
-        if self.dark_mode_btn.isChecked():
-            self.setStyleSheet("QMainWindow { background-color: #222; color: #fff; } QLabel { color: #fff; }")
-            self.dark_mode_btn.setText(self.t("Modo claro"))
-        else:
-            self.apply_theme()
-            self.dark_mode_btn.setText(self.t("Modo oscuro"))
-
-    def get_battery_level(self):
-        try:
-            import psutil
-            battery = psutil.sensors_battery()
-            if battery:
-                return int(battery.percent)
-            else:
-                return 100
-        except:
-            return 100
-
-    # Language panel
-    def language_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(self.t("Selecciona el idioma del sistema:")))
-        self.lang_combo = QComboBox()
-        for code, name in GOOGLE_LANGS.items():
-            self.lang_combo.addItem(f"{name} ({code})", code)
-        # Selecciona actual
-        if self.language in GOOGLE_LANGS:
-            self.lang_combo.setCurrentText(f"{GOOGLE_LANGS[self.language]} ({self.language})")
-        layout.addWidget(self.lang_combo)
-
-        self.lang_status = QLabel("")
-        layout.addWidget(self.lang_status)
-        apply_btn = QPushButton(self.t("Aplicar idioma"))
-        apply_btn.clicked.connect(self.change_language)
-        layout.addWidget(apply_btn)
-        panel.setLayout(layout)
-        return panel
-
-    def change_language(self):
-        code = self.lang_combo.currentData()
-        lang_file = os.path.join(CONFIG_DIR, f"{code}.json")
-        if not os.path.exists(lang_file):
-            if self.check_internet():
-                self.lang_status.setText(self.t("Descargando idioma..."))
-                QApplication.processEvents()
-                self.download_language(code)
-            else:
-                self.lang_status.setText(self.t("No hay conexión. Solo idiomas instalados disponibles."))
-                return
-        self.language = code
-        self.translations = self.load_language(self.language)
-        self.lang_status.setText(self.t("Idioma cambiado"))
-        self.refresh_ui()
-
-    def download_language(self, code):
-        base_keys = [
-            "Wi-Fi", "Bluetooth", "Aplicaciones", "Almacenamiento", "Tema", "Pantalla y Batería",
-            "Idioma del sistema", "Actualizaciones", "Acerca del dispositivo",
-            "Redes Wi-Fi disponibles:", "Contraseña", "Conectar", "Error al escanear redes",
-            "Error", "No se pudo conectar", "Aplicaciones instaladas:", "Eliminado",
-            "Se eliminó la app", "No se pudo eliminar", "Total", "Usado", "Libre",
-            "Color del texto", "Color de botones", "Aplicar tema", "Seleccionar color",
-            "Brillo de pantalla", "Alternar modo oscuro", "Modo oscuro", "Modo claro",
-            "Nivel de batería", "Selecciona el idioma del sistema:", "Aplicar idioma",
-            "Descargando idioma...", "No hay conexión. Solo idiomas instalados disponibles.",
-            "Idioma cambiado", "Buscar actualizaciones", "Verifica y aplica actualizaciones del sistema.",
-            "Buscando actualizaciones...", "Nueva versión disponible: 1.1.0", "Descargar e instalar",
-            "Descargando e instalando actualización...", "Actualización instalada. Reinicie para aplicar cambios.",
-            "Sistema", "Arquitectura"
-        ]
-        translations = {}
-        for key in base_keys:
-            translated = self.translate_text(key, "es", code)
-            translations[key] = translated
-        lang_file = os.path.join(CONFIG_DIR, f"{code}.json")
-        with open(lang_file, "w", encoding="utf-8") as f:
-            json.dump(translations, f, ensure_ascii=False, indent=2)
-
-    def load_language(self, code):
-        lang_file = os.path.join(CONFIG_DIR, f"{code}.json")
-        if os.path.exists(lang_file):
-            with open(lang_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        else:
-            return {}
-
-    def translate_text(self, text, from_lang, to_lang):
-        try:
-            response = requests.get(
-                f"https://translate.googleapis.com/translate_a/single",
-                params={
-                    "client": "gtx",
-                    "sl": from_lang,
-                    "tl": to_lang,
-                    "dt": "t",
-                    "q": text
-                }
-            )
-            data = response.json()
-            return data[0][0][0]
-        except Exception as e:
-            return text
-
-    def check_internet(self):
-        try:
-            requests.get("https://www.google.com", timeout=3)
+    def handle_event(self, event):
+        if event.type == MOUSEBUTTONDOWN and event.button == 1 and self.hovered:
+            if self.action:
+                self.action()
             return True
-        except:
-            return False
+        return False
 
-    def refresh_ui(self):
-        self.sidebar.clear()
-        self.sections = {
-            self.t("Wi-Fi"): self.wifi_panel(),
-            self.t("Bluetooth"): self.bluetooth_panel(),
-            self.t("Aplicaciones"): self.apps_panel(),
-            self.t("Almacenamiento"): self.storage_panel(),
-            self.t("Tema"): self.theme_panel(),
-            self.t("Pantalla y Batería"): self.display_battery_panel(),
-            self.t("Idioma del sistema"): self.language_panel(),
-            self.t("Actualizaciones"): self.update_panel(),
-            self.t("Acerca del dispositivo"): self.about_panel()
-        }
-        for name, widget in self.sections.items():
-            item = QListWidgetItem(name)
-            self.sidebar.addItem(item)
-            self.stack.addWidget(widget)
-        self.header.setText(self.sidebar.item(self.sidebar.currentRow()).text())
+# Clase para checkbox personalizados
+class Checkbox:
+    def __init__(self, x, y, text, text_color, font, checked=False, action=None):
+        self.rect = pygame.Rect(x, y, 20, 20)
+        self.text = text
+        self.text_color = text_color
+        self.font = font
+        self.checked = checked
+        self.action = action
+        self.hovered = False
 
-    # Update (system update) panel
-    def update_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(self.t("Verifica y aplica actualizaciones del sistema.")))
-        check_btn = QPushButton(self.t("Buscar actualizaciones"))
-        check_btn.clicked.connect(self.check_updates)
-        self.update_status = QLabel("")
-        layout.addWidget(check_btn)
-        layout.addWidget(self.update_status)
-        panel.setLayout(layout)
-        return panel
+    def draw(self, surface, theme):
+        # Dibujar checkbox
+        border_color = theme['primary'] if self.hovered else theme['border']
+        pygame.draw.rect(surface, border_color, self.rect, width=1, border_radius=4)
 
-    def check_updates(self):
-        self.update_status.setText(self.t("Buscando actualizaciones..."))
-        QApplication.processEvents()
-        import time; time.sleep(2)
-        self.update_status.setText(self.t("Nueva versión disponible: 1.1.0"))
-        update_btn = QPushButton(self.t("Descargar e instalar"))
-        update_btn.clicked.connect(self.install_update)
-        layout = self.update_status.parentWidget().layout()
-        layout.addWidget(update_btn)
+        if self.checked:
+            pygame.draw.rect(surface, theme['primary'], self.rect, border_radius=4)
+            # Dibujar marca de verificación
+            pygame.draw.line(surface, theme['card'],
+                            (self.rect.x + 4, self.rect.y + 10),
+                            (self.rect.x + 8, self.rect.y + 14), 2)
+            pygame.draw.line(surface, theme['card'],
+                            (self.rect.x + 8, self.rect.y + 14),
+                            (self.rect.x + 16, self.rect.y + 6), 2)
 
-    def install_update(self):
-        self.update_status.setText(self.t("Descargando e instalando actualización..."))
-        QApplication.processEvents()
-        import time; time.sleep(3)
-        self.update_status.setText(self.t("Actualización instalada. Reinicie para aplicar cambios."))
+        # Dibujar texto
+        text_surface = self.font.render(self.text, True, self.text_color)
+        surface.blit(text_surface, (self.rect.x + 30, self.rect.y))
 
-    def about_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(f"{self.t('Sistema')}: {platform.system()} {platform.release()}"))
-        layout.addWidget(QLabel(f"{self.t('Arquitectura')}: {platform.machine()}"))
-        layout.addWidget(QLabel(f"Python: {platform.python_version()}"))
-        panel.setLayout(layout)
-        return panel
+    def check_hover(self, pos):
+        self.hovered = self.rect.collidepoint(pos)
+        return self.hovered
 
-    def get_apps_directory(self):
-        if os.name == "nt":
-            from ctypes import windll, create_unicode_buffer
-            buf = create_unicode_buffer(260)
-            windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf)
-            return os.path.join(buf.value, "Flatr Apps")
+    def handle_event(self, event):
+        if event.type == MOUSEBUTTONDOWN and event.button == 1 and self.hovered:
+            self.checked = not self.checked
+            if self.action:
+                self.action(self.checked)
+            return True
+        return False
+
+# Clase para grupo de controles
+class ControlGroup:
+    def __init__(self, x, y, width, height, title, theme, font_title, font_text):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.title = title
+        self.theme = theme
+        self.font_title = font_title
+        self.font_text = font_text
+        self.controls = []
+
+    def add_checkbox(self, text, action=None):
+        y_pos = self.rect.y + 40 + len(self.controls) * 30
+        checkbox = Checkbox(self.rect.x + 20, y_pos, text, self.theme['text'], self.font_text, action=action)
+        self.controls.append(checkbox)
+        return checkbox
+
+    def draw(self, surface):
+        # Dibujar fondo del grupo
+        pygame.draw.rect(surface, self.theme['card'], self.rect, border_radius=8)
+        pygame.draw.rect(surface, self.theme['border'], self.rect, width=1, border_radius=8)
+
+        # Dibujar título
+        title_surface = self.font_title.render(self.title, True, self.theme['text'])
+        surface.blit(title_surface, (self.rect.x + 15, self.rect.y + 10))
+
+        # Dibujar controles
+        for control in self.controls:
+            control.draw(surface, self.theme)
+
+    def handle_event(self, event):
+        for control in self.controls:
+            if control.handle_event(event):
+                return True
+        return False
+
+    def check_hover(self, pos):
+        for control in self.controls:
+            control.check_hover(pos)
+
+# Clase para terminal de salida
+class Terminal:
+    def __init__(self, x, y, width, height, theme, font):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.theme = theme
+        self.font = font
+        self.lines = []
+        self.scroll_offset = 0
+        self.placeholder = ""
+
+    def add_line(self, line):
+        self.lines.append(line)
+        # Auto-scroll to bottom
+        self.scroll_offset = max(0, len(self.lines) * 20 - self.rect.height + 40)
+
+    def set_placeholder(self, text):
+        self.placeholder = text
+
+    def draw(self, surface):
+        # Dibujar fondo del terminal
+        pygame.draw.rect(surface, self.theme['card'], self.rect, border_radius=8)
+        pygame.draw.rect(surface, self.theme['border'], self.rect, width=1, border_radius=8)
+
+        # Dibujar contenido
+        content_rect = pygame.Rect(self.rect.x + 10, self.rect.y + 10, self.rect.width - 20, self.rect.height - 20)
+
+        if not self.lines:
+            # Mostrar placeholder si no hay contenido
+            placeholder_surface = self.font.render(self.placeholder, True, self.theme['text_secondary'])
+            surface.blit(placeholder_surface, (content_rect.x, content_rect.y))
         else:
-            return os.path.expanduser("~/Documentos/Flatr Apps")
+            # Mostrar líneas de contenido
+            for i, line in enumerate(self.lines):
+                y_pos = content_rect.y + i * 20 - self.scroll_offset
+                if y_pos + 20 >= self.rect.y and y_pos <= self.rect.y + self.rect.height:
+                    line_surface = self.font.render(line, True, self.theme['text'])
+                    surface.blit(line_surface, (content_rect.x, y_pos))
 
-    def get_folder_size(self, path):
-        total = 0
-        for root, _, files in os.walk(path):
-            for f in files:
-                fp = os.path.join(root, f)
-                if os.path.exists(fp):
-                    total += os.path.getsize(fp)
-        return round(total / (1024 * 1024), 2)
+# Clase para la aplicación principal
+class SystemTweakerApp:
+    def __init__(self):
+        self.dark_mode = load_theme_config()
+        self.theme = GITHUB_DARK if self.dark_mode else GITHUB_LIGHT
+        self.language, self.remember_language = load_language_config()
+        self.translations = translations.get(self.language, translations['en'])
+        self.os_type = platform.system()
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = FlatrConfigurator()
-    window.show()
-    sys.exit(app.exec())            item = QListWidgetItem(name)
-            self.sidebar.addItem(item)
-            self.stack.addWidget(widget)
+        # Fuentes
+        self.font_large = pygame.font.SysFont("Arial", 24)
+        self.font_medium = pygame.font.SysFont("Arial", 18)
+        self.font_small = pygame.font.SysFont("Arial", 14)
+        self.font_mono = pygame.font.SysFont("Courier New", 12)
 
-        self.sidebar.setCurrentRow(0)
+        # Estados de la aplicación
+        self.current_screen = "language"  # language, main, terminal
+        self.particles = []
 
-        content = QVBoxLayout()
-        content.addWidget(self.header)
-        content.addWidget(self.stack)
+        # Inicializar controles según pantalla
+        self.init_language_screen()
 
-        layout = QHBoxLayout()
-        layout.addWidget(self.sidebar)
-        layout.addLayout(content)
+    def init_language_screen(self):
+        self.current_screen = "language"
+        self.language_buttons = []
+        self.remember_checkbox = None
+        self.continue_button = None
 
-        container = QWidget()
-        container.setLayout(layout)
-        self.setCentralWidget(container)
-        self.apply_theme()
+        languages = [
+            ("English", "en", (3, 102, 214)),
+            ("Español", "es", (40, 167, 69)),
+            ("Français", "fr", (111, 66, 193)),
+            ("Deutsch", "de", (255, 211, 61)),
+            ("Italiano", "it", (234, 74, 90))
+        ]
 
-    def update_section(self, index):
-        self.stack.setCurrentIndex(index)
-        self.header.setText(self.sidebar.item(index).text())
+        # Crear botones de idioma
+        for i, (name, code, color) in enumerate(languages):
+            x = 200 + (i % 3) * 200
+            y = 200 + (i // 3) * 120
+            btn = Button(x, y, 180, 100, name, self.theme['card'], self.theme['hover'],
+                        color, self.font_medium, lambda c=code: self.select_language(c))
+            self.language_buttons.append(btn)
 
-    def apply_theme(self):
-        self.setStyleSheet(f"""
-            QMainWindow {{ background-color: #f0f0f0; }}
-            QLabel {{ color: {self.text_color}; font-size: 14px; }}
-            QPushButton {{
-                background-color: {self.button_color};
-                color: white;
-                border-radius: 6px;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{ background-color: #005A9E; }}
-            QListWidget {{ background-color: #e0e0e0; border: none; }}
-            QListWidget::item {{ padding: 12px; }}
-            QListWidget::item:selected {{ background-color: #ffffff; }}
-        """)
+        # Crear checkbox para recordar elección
+        self.remember_checkbox = Checkbox(400, 450, self.translations['remember_choice'],
+                                         self.theme['text'], self.font_small, False)
 
-    def wifi_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Redes Wi-Fi disponibles:"))
-        self.wifi_list = QComboBox()
-        self.wifi_pass = QLineEdit()
-        self.wifi_pass.setPlaceholderText("Contraseña")
-        self.wifi_pass.setEchoMode(QLineEdit.EchoMode.Password)
-        connect_btn = QPushButton("Conectar")
-        connect_btn.clicked.connect(self.connect_wifi)
+        # Crear botón continuar
+        self.continue_button = Button(400, 500, 200, 40, self.translations['continue'],
+                                     self.theme['success'], (35, 134, 54),
+                                     (255, 255, 255), self.font_medium, self.go_to_main_screen)
 
-        try:
-            if os.name == "nt":
-                result = subprocess.check_output("netsh wlan show networks", shell=True).decode()
-                for line in result.splitlines():
-                    if "SSID" in line:
-                        ssid = line.split(":")[1].strip()
-                        self.wifi_list.addItem(ssid)
-            else:
-                result = subprocess.check_output("nmcli -t -f SSID dev wifi", shell=True).decode()
-                for ssid in result.splitlines():
-                    if ssid:
-                        self.wifi_list.addItem(ssid.strip())
-        except Exception as e:
-            layout.addWidget(QLabel(f"Error al escanear redes: {e}"))
+    def init_main_screen(self):
+        self.current_screen = "main"
 
-        layout.addWidget(self.wifi_list)
-        layout.addWidget(self.wifi_pass)
-        layout.addWidget(connect_btn)
-        panel.setLayout(layout)
-        return panel
+        # Crear botón de tema
+        self.theme_button = Button(20, 20, 200, 40, self.translations['theme_toggle'],
+                                  self.theme['card'], self.theme['hover'], self.theme['text'],
+                                  self.font_small, self.toggle_theme)
 
-    def connect_wifi(self):
-        ssid = self.wifi_list.currentText()
-        password = self.wifi_pass.text()
-        try:
-            if os.name == "nt":
-                subprocess.run(f'netsh wlan connect name="{ssid}"', shell=True)
-            else:
-                subprocess.run(f'nmcli dev wifi connect "{ssid}" password "{password}"', shell=True)
-            self.wifi_pass.clear()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo conectar:\n{e}")
+        # Crear botón de terminal
+        self.terminal_button = Button(WIDTH - 220, 20, 200, 40, self.translations['terminal_output'],
+                                     self.theme['card'], self.theme['hover'], self.theme['text'],
+                                     self.font_small, self.go_to_terminal_screen)
 
-    def bluetooth_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Bluetooth:"))
-        layout.addWidget(QLabel("Usa dongle o adaptador interno."))
-        panel.setLayout(layout)
-        return panel
+        # Crear grupos de controles según el sistema operativo
+        if self.os_type == "Windows":
+            self.control_groups = [
+                ControlGroup(50, 100, 400, 250, self.translations['performance_optimization'],
+                            self.theme, self.font_medium, self.font_small),
+                ControlGroup(50, 370, 400, 180, self.translations['privacy_settings'],
+                            self.theme, self.font_medium, self.font_small)
+            ]
 
-    def apps_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Aplicaciones instaladas:"))
-        for folder in os.listdir(self.apps_dir):
-            path = os.path.join(self.apps_dir, folder)
-            if os.path.isdir(path):
-                size = self.get_folder_size(path)
-                btn = QPushButton(f"{folder} ({size} MB)")
-                btn.clicked.connect(lambda _, p=path: self.remove_app(p))
-                if size > 100:  # apps pesadas
-                    btn.setStyleSheet("background-color: #ff5555; color: white;")
-                layout.addWidget(btn)
-        panel.setLayout(layout)
-        return panel
+            # Añadir controles de Windows
+            self.windows_controls = {
+                'disable_animations': self.control_groups[0].add_checkbox(self.translations['disable_animations']),
+                'prefetch_tweaks': self.control_groups[0].add_checkbox(self.translations['prefetch_tweaks']),
+                'disable_tips': self.control_groups[0].add_checkbox(self.translations['disable_tips']),
+                'disable_telemetry': self.control_groups[1].add_checkbox(self.translations['disable_telemetry']),
+                'disable_ads': self.control_groups[1].add_checkbox(self.translations['disable_ads'])
+            }
 
-    def remove_app(self, path):
-        try:
-            shutil.rmtree(path)
-            QMessageBox.information(self, "Eliminado", f"Se eliminó la app:\n{os.path.basename(path)}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo eliminar:\n{e}")
+        elif self.os_type == "Linux":
+            self.control_groups = [
+                ControlGroup(50, 100, 400, 200, self.translations['basic_linux_settings'],
+                            self.theme, self.font_medium, self.font_small)
+            ]
 
-    def storage_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        total, used, free = shutil.disk_usage("/")
-        layout.addWidget(QLabel(f"Total: {total // (2**30)} GB"))
-        layout.addWidget(QLabel(f"Usado: {used // (2**30)} GB"))
-        layout.addWidget(QLabel(f"Libre: {free // (2**30)} GB"))
-        panel.setLayout(layout)
-        return panel
+            # Añadir controles de Linux
+            self.linux_controls = {
+                'enable_ufw': self.control_groups[0].add_checkbox(self.translations['enable_ufw']),
+                'install_updates': self.control_groups[0].add_checkbox(self.translations['install_updates']),
+                'clean_packages': self.control_groups[0].add_checkbox(self.translations['clean_packages'])
+            }
 
-    def theme_panel(self):
-        panel = QWidget()
-        layout = QFormLayout()
-        layout.addRow(QLabel("Color del texto:"), self.color_picker("text"))
-        layout.addRow(QLabel("Color de botones:"), self.color_picker("button"))
-        apply_btn = QPushButton("Aplicar tema")
-        apply_btn.clicked.connect(self.apply_theme)
-        layout.addRow(apply_btn)
-        panel.setLayout(layout)
-        return panel
+        # Crear botón de aplicar
+        self.apply_button = Button(WIDTH - 220, HEIGHT - 70, 200, 40, self.translations['apply_selected'],
+                                  self.theme['success'], (35, 134, 54), (255, 255, 255),
+                                  self.font_medium, self.apply_settings)
 
-    def color_picker(self, target):
-        btn = QPushButton("Seleccionar color")
-        def pick():
-            color = QColorDialog.getColor()
-            if color.isValid():
-                hex_color = color.name()
-                if target == "text":
-                    self.text_color = hex_color
-                else:
-                    self.button_color = hex_color
-        btn.clicked.connect(pick)
-        return btn
+    def init_terminal_screen(self):
+        self.current_screen = "terminal"
 
-    def about_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(f"Sistema: {platform.system()} {platform.release()}"))
-        layout.addWidget(QLabel(f"Arquitectura: {platform.machine()}"))
-        layout.addWidget(QLabel(f"Python: {platform.python_version()}"))
-        panel.setLayout(layout)
-        return panel
+        # Crear terminal
+        self.terminal = Terminal(50, 100, WIDTH - 100, HEIGHT - 200, self.theme, self.font_mono)
+        self.terminal.set_placeholder(self.translations['terminal_placeholder'])
 
-    def get_apps_directory(self):
-        if os.name == "nt":
-            from ctypes import windll, create_unicode_buffer
-            buf = create_unicode_buffer(260)
-            windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf)
-            return os.path.join(buf.value, "Flatr Apps")
+        # Crear botón de volver
+        self.back_button = Button(50, HEIGHT - 70, 200, 40, self.translations['back'],
+                                 self.theme['card'], self.theme['hover'], self.theme['text'],
+                                 self.font_medium, self.go_to_main_screen)
+
+    def select_language(self, language):
+        self.language = language
+        self.translations = translations.get(self.language, translations['en'])
+
+        # Actualizar textos de los controles
+        if hasattr(self, 'remember_checkbox'):
+            self.remember_checkbox.text = self.translations['remember_choice']
+        if hasattr(self, 'continue_button'):
+            self.continue_button.text = self.translations['continue']
+
+    def toggle_theme(self):
+        self.dark_mode = not self.dark_mode
+        self.theme = GITHUB_DARK if self.dark_mode else GITHUB_LIGHT
+        save_theme_config(self.dark_mode)
+
+        # Recrear controles con el nuevo tema
+        if self.current_screen == "main":
+            self.init_main_screen()
+        elif self.current_screen == "terminal":
+            self.init_terminal_screen()
+
+    def go_to_main_screen(self):
+        if self.current_screen == "language" and self.remember_checkbox:
+            save_language_config(self.language, self.remember_checkbox.checked)
+
+        self.init_main_screen()
+
+    def go_to_terminal_screen(self):
+        self.init_terminal_screen()
+
+    def apply_settings(self):
+        commands = []
+
+        if self.os_type == "Windows":
+            if self.windows_controls['disable_animations'].checked:
+                commands.extend([
+                    'reg add "HKEY_CURRENT_USER\\Control Panel\\Desktop\\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f',
+                    'reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f'
+                ])
+
+            if self.windows_controls['prefetch_tweaks'].checked:
+                commands.append('reg add "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters" /v EnablePrefetcher /t REG_DWORD /d 1 /f')
+
+            if self.windows_controls['disable_tips'].checked:
+                commands.append('reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager" /v SubscribedContent-310093Enabled /t REG_DWORD /d 0 /f')
+
+            if self.windows_controls['disable_telemetry'].checked:
+                commands.extend([
+                    'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f',
+                    'reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f'
+                ])
+
+            if self.windows_controls['disable_ads'].checked:
+                commands.append('reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager" /v SystemPaneSuggestionsEnabled /t REG_DWORD /d 0 /f')
+
+        elif self.os_type == "Linux":
+            if self.linux_controls['enable_ufw'].checked:
+                commands.extend([
+                    'sudo ufw enable',
+                    'sudo systemctl enable ufw'
+                ])
+
+            if self.linux_controls['install_updates'].checked:
+                commands.extend([
+                    'sudo apt update',
+                    'sudo apt upgrade -y'
+                ])
+
+            if self.linux_controls['clean_packages'].checked:
+                commands.extend([
+                    'sudo apt autoremove -y',
+                    'sudo apt autoclean -y'
+                ])
+
+        if commands:
+            self.go_to_terminal_screen()
+            self.terminal.add_line(f"{self.translations['applying_settings']}")
+
+            # Ejecutar comandos
+            for cmd in commands:
+                self.terminal.add_line(f"> {cmd}")
+
+                try:
+                    if self.os_type == "Windows":
+                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                    else:
+                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+
+                    if result.stdout:
+                        for line in result.stdout.split('\n'):
+                            if line.strip():
+                                self.terminal.add_line(line)
+                    if result.stderr:
+                        for line in result.stderr.split('\n'):
+                            if line.strip():
+                                self.terminal.add_line(f"Error: {line}")
+
+                except subprocess.TimeoutExpired:
+                    self.terminal.add_line("Command timed out.")
+                except Exception as e:
+                    self.terminal.add_line(f"Exception: {str(e)}")
+
+                self.terminal.add_line("-" * 50)
+
+            self.terminal.add_line(f"{self.translations['settings_applied']}")
         else:
-            return os.path.expanduser("~/Documentos/Flatr Apps")
+            # Mostrar mensaje de que no se seleccionó ninguna opción
+            self.terminal.add_line(f"{self.translations['select_option']}")
 
-    def get_folder_size(self, path):
-        total = 0
-        for root, _, files in os.walk(path):
-            for f in files:
-                fp = os.path.join(root, f)
-                if os.path.exists(fp):
-                    total += os.path.getsize(fp)
-        return round(total / (1024 * 1024), 2)
+    def add_particle(self):
+        x = pygame.mouse.get_pos()[0]
+        y = pygame.mouse.get_pos()[1]
+        color = (84, 174, 255) if time.time() % 2 < 1 else (255, 118, 117)
+        size = 3 + 7 * (time.time() % 1)
+        speed_x = (time.time() % 1) - 0.5
+        speed_y = (time.time() % 1) - 0.5
 
+        self.particles.append(Particle(x, y, color, size, speed_x, speed_y))
+
+    def run(self):
+        clock = pygame.time.Clock()
+        running = True
+
+        while running:
+            current_time = time.time()
+            mouse_pos = pygame.mouse.get_pos()
+
+            # Manejar eventos
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    running = False
+
+                # Manejar eventos según la pantalla actual
+                if self.current_screen == "language":
+                    for btn in self.language_buttons:
+                        btn.handle_event(event)
+                    if self.remember_checkbox:
+                        self.remember_checkbox.handle_event(event)
+                    if self.continue_button:
+                        self.continue_button.handle_event(event)
+
+                elif self.current_screen == "main":
+                    self.theme_button.handle_event(event)
+                    self.terminal_button.handle_event(event)
+                    self.apply_button.handle_event(event)
+                    for group in self.control_groups:
+                        group.handle_event(event)
+
+                elif self.current_screen == "terminal":
+                    self.back_button.handle_event(event)
+
+            # Actualizar partículas
+            if current_time % 0.1 < 0.05:
+                self.add_particle()
+
+            self.particles = [p for p in self.particles if p.update()]
+
+            # Dibujar fondo
+            screen.fill(self.theme['bg'])
+
+            # Dibujar partículas
+            for particle in self.particles:
+                particle.draw(screen)
+
+            # Dibujar interfaz según la pantalla actual
+            if self.current_screen == "language":
+                # Dibujar título
+                title_surface = self.font_large.render(self.translations['title'], True, self.theme['text'])
+                screen.blit(title_surface, (WIDTH // 2 - title_surface.get_width() // 2, 50))
+
+                subtitle_surface = self.font_medium.render(self.translations['select_language'], True, self.theme['text_secondary'])
+                screen.blit(subtitle_surface, (WIDTH // 2 - subtitle_surface.get_width() // 2, 100))
+
+                # Dibujar controles
+                for btn in self.language_buttons:
+                    btn.check_hover(mouse_pos)
+                    btn.draw(screen)
+
+                if self.remember_checkbox:
+                    self.remember_checkbox.check_hover(mouse_pos)
+                    self.remember_checkbox.draw(screen, self.theme)
+
+                if self.continue_button:
+                    self.continue_button.check_hover(mouse_pos)
+                    self.continue_button.draw(screen)
+
+            elif self.current_screen == "main":
+                # Dibujar título
+                title_surface = self.font_large.render(self.translations['title'], True, self.theme['text'])
+                screen.blit(title_surface, (WIDTH // 2 - title_surface.get_width() // 2, 50))
+
+                # Dibujar controles
+                self.theme_button.check_hover(mouse_pos)
+                self.theme_button.draw(screen)
+
+                self.terminal_button.check_hover(mouse_pos)
+                self.terminal_button.draw(screen)
+
+                for group in self.control_groups:
+                    group.check_hover(mouse_pos)
+                    group.draw(screen)
+
+                self.apply_button.check_hover(mouse_pos)
+                self.apply_button.draw(screen)
+
+            elif self.current_screen == "terminal":
+                # Dibujar título
+                title_surface = self.font_large.render(self.translations['terminal_output'], True, self.theme['text'])
+                screen.blit(title_surface, (WIDTH // 2 - title_surface.get_width() // 2, 50))
+
+                # Dibujar terminal
+                self.terminal.draw(screen)
+
+                # Dibujar botón de volver
+                self.back_button.check_hover(mouse_pos)
+                self.back_button.draw(screen)
+
+            # Actualizar pantalla
+            pygame.display.flip()
+            clock.tick(60)
+
+        pygame.quit()
+        sys.exit()
+
+# Ejecutar la aplicación
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = FlatrConfigurator()
-    window.show()
-    sys.exit(app.exec())
+    app = SystemTweakerApp()
+    app.run()
