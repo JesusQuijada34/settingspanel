@@ -123,7 +123,7 @@ translations = {
         "privacy_settings": "Ajustes de Privacidad",
         "disable_telemetry": "Limitar telemetría",
         "disable_ads": "Deshabilitar publicidad integrada",
-        "apply_selected": "Aplicar cambios seleccionados",
+        "apply_selected": "Aplicar cambios",
         "basic_linux_settings": "Ajustes Básicos de Linux",
         "enable_ufw": "Habilitar firewall (UFW)",
         "install_updates": "Instalar actualizaciones disponibles",
